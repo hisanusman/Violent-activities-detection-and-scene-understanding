@@ -1,0 +1,6 @@
+__pycache__
+Web Application/static/videos/*
+*.pt
+*.pth
+.vscode
+Web Application/static/processed/*

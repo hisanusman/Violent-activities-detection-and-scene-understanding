@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Grid</title>
+    <style>
+        .container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            padding: 20px;
+        }
+        video {
+            width: 100%;
+            height: 400px; /* Set a larger fixed height for all videos */
+            object-fit: contain; /* Ensure the entire video is visible without being cut off */
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Video Grid</h1>
+    <div class="container">
+        {% for video in videos %}
+            <a href="{{ url_for('video', video_id=loop.index0) }}">
+                <!-- Added autoplay, muted, and loop -->
+                <video src="{{ url_for('static', filename='videos/' + video) }}" controls autoplay muted loop></video>
+            </a>
+        {% endfor %}
+    </div>
+</body>
+</html>

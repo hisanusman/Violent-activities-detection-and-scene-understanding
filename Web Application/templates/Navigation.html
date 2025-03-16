@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Navigator</title>
+    <style>
+        video {
+            width: 100%;
+            height: 600px;
+            object-fit: contain;
+        }
+        .button-container {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .button-container button {
+            padding: 10px 20px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .button-container button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+    <script>
+        let times = {{ times|tojson }};
+        let currentIndex = 0;
+        let video;
+        function navigate(direction) {
+            if (times.length === 0) return;
+            if (direction === 'prev' && currentIndex > 0) {
+                currentIndex--;
+            } else if (direction === 'next' && currentIndex < times.length - 1) {
+                currentIndex++;
+            } else {
+                return;
+            }
+            const timeStr = times[currentIndex];
+            const parts = timeStr.split(':');
+            if (parts.length !== 3) return;
+            const hours = parseInt(parts[0], 10);
+            const minutes = parseInt(parts[1], 10);
+            const seconds = parseInt(parts[2], 10);
+            const timeInSeconds = hours * 3600 + minutes * 60 + seconds;
+            if (video.readyState >= 2) {
+                video.currentTime = timeInSeconds;
+                video.pause();
+            }
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            video = document.getElementById('video');
+            video.pause();
+            video.addEventListener('loadedmetadata', () => {
+                if (times.length > 0) {
+                    const firstTime = times[0];
+                    const parts = firstTime.split(':');
+                    const timeInSeconds = parseInt(parts[0])*3600 + parseInt(parts[1])*60 + parseInt(parts[2]);
+                    video.currentTime = timeInSeconds;
+                    video.pause();
+                }
+            });
+        });
+    </script>
+</head>
+<body>
+    <h1>Video Navigator</h1>
+    <video id="video" controls>
+        <!-- The processed video file is in static/processed -->
+        <source src="{{ url_for('static', filename='processed/' + video) }}" type="video/webm">
+        Your browser does not support the video tag.
+    </video>
+    <div class="button-container">
+        <button onclick="navigate('prev')">Previous</button>
+        <button onclick="navigate('next')">Next</button>
+    </div>
+    <div class="button-container">
+        <a href="/">Back to Grid</a>
+        <a href="/create_report/{{ video_id }}">Create Report</a>
+    </div>
+</body>
+</html>

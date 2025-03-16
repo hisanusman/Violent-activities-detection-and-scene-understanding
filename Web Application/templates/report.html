@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Detection Report for {{ video }}</title>
+</head>
+<body>
+    <h1>Detection Report for {{ video }}</h1>
+    <div>
+        <p><strong>Most Frequent Activity:</strong> {{ activity }}</p>
+        <p><strong>Unique Person Count:</strong> {{ unique_person_count }}</p>
+        <p><strong>Unique Weapon Count:</strong> {{ unique_weapon_count }}</p>
+        <p><strong>Scene Description:</strong> {{ scene_description }}</p>
+    </div>
+    <div>
+        <a href="{{ url_for('static', filename=count_vid_name) }}" target="_blank">Download PDF Report</a>
+    </div>
+    <br>
+    <a href="{{ url_for('index') }}">Back to Videos</a>
+</body>
+</html>

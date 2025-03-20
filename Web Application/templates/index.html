@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WatchDog AI - Video Grid</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    body {
+      background-color: #111827;
+      color: white;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .header, .footer {
+      background-color: #1e293b;
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+
+    .header {
+      height: 60px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    }
+
+    .footer {
+      height: 40px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      font-weight: bold;
+      font-size: 1.5rem;
+    }
+
+    .logo-icon {
+      color: #3b82f6;
+      margin-right: 10px;
+      font-size: 1.6rem;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .time, .date {
+      color: #e5e7eb;
+      font-size: 0.9rem;
+    }
+
+    /* Main Content - Fixed 2x2 Grid, No Scroll */
+    .main-content {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      grid-template-rows: repeat(2, 1fr);
+      gap: 10px;
+      padding: 10px;
+      height: calc(100vh - 100px); /* Adjusting for header & footer */
+    }
+
+    .camera-card {
+      background-color: #1e293b;
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative; /* Allows absolute positioning inside */
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Camera Number Label */
+    .camera-label {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background-color: rgba(0, 0, 0, 0.7); /* Darker background for better visibility */
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 1rem;
+      font-weight: bold;
+      color: white;
+      display: flex;
+      align-items: center;
+      z-index: 10; /* Ensures it's on top of the video */
+    }
+
+    .label-icon {
+      color: #10b981;
+      margin-right: 6px;
+    }
+
+    .camera-feed {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      background-color: #16202f;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .camera-feed video, .camera-feed img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain; /* Ensure the full video is visible */
+    }
+
+    .system-status {
+      display: flex;
+      align-items: center;
+      font-size: 0.9rem;
+      color: #e5e7eb;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      background-color: #10b981;
+      border-radius: 50%;
+      margin-right: 10px;
+    }
+
+    a {
+      text-decoration: none;
+      color: inherit;
+    }
+
+    /* Hide live labels */
+    .status-indicator {
+      display: none;
+    }
+
+    /* Remove video controls */
+    .camera-feed video::-webkit-media-controls {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <span class="logo-icon">&#128249;</span>
+      <span>WatchDog AI</span>
+    </div>
+    <div class="header-right">
+      <div class="time">
+        <span id="current-time"></span>
+      </div>
+      <div class="date">
+        <span id="current-date"></span>
+      </div>
+    </div>
+  </div>
+  
+  <div class="main-content">
+    {% for video in videos %}
+    <div class="camera-card">
+      <div class="camera-label">
+        <span class="label-icon">&#9679;</span>
+        <span>Camera #{{ loop.index }}</span>
+      </div>
+      <a href="{{ url_for('video', video_id=loop.index0) }}">
+        <div class="camera-feed">
+          {% if video == "droidcam" %}
+            <img src="{{ url_for('raw_stream', video_id=loop.index0) }}" alt="Live Feed">
+          {% else %}
+            <video src="{{ url_for('static', filename='videos/' + video) }}" autoplay muted loop playsinline></video>
+          {% endif %}
+        </div>
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+  
+  <div class="footer">
+    <div class="system-status">
+      <span class="status-dot"></span>
+      <span class="status-text">System Status: Normal</span>
+      <span>Cameras Online: {{ videos|length }}/{{ videos|length }}</span>
+    </div>
+  </div>
+
+  <script>
+    // Update time and date
+    function updateDateTime() {
+      const now = new Date();
+      const timeOptions = { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true };
+      const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+      
+      document.getElementById('current-time').textContent = now.toLocaleTimeString('en-US', timeOptions);
+      document.getElementById('current-date').textContent = now.toLocaleDateString('en-US', dateOptions);
+    }
+
+    updateDateTime();
+    setInterval(updateDateTime, 1000);
+
+    // Check video status
+    function checkVideoStatus() {
+      const videos = document.querySelectorAll('video, img');
+      let onlineCount = 0;
+      
+      videos.forEach(element => {
+        if (element.tagName === 'VIDEO' ? element.readyState >= 2 : element.complete) {
+          onlineCount++;
+        }
+      });
+      
+      document.querySelector('.system-status span:last-child').textContent = 
+        `Cameras Online: ${onlineCount}/{{ videos|length }}`;
+    }
+    
+    setInterval(checkVideoStatus, 5000);
+    checkVideoStatus();
+  </script>
+</body>
+</html>

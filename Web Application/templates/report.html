@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Detection Report - WatchDog AI</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    body {
+      background-color: #111827;
+      color: white;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .header, .footer {
+      background-color: #1e293b;
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+
+    .header {
+      height: 60px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+      position: absolute;
+      top: 0;
+    }
+
+    .footer {
+      height: 40px;
+      position: absolute;
+      bottom: 0;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      font-weight: bold;
+      font-size: 1.5rem;
+    }
+
+    .logo-icon {
+      color: #3b82f6;
+      margin-right: 10px;
+      font-size: 1.6rem;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .time, .date {
+      color: #e5e7eb;
+      font-size: 0.9rem;
+    }
+
+    /* Report Content */
+    .report-container {
+      background-color: #1e293b;
+      padding: 20px;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 600px;
+      text-align: left;
+      box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.2);
+    }
+
+    .report-title {
+      font-size: 2rem;
+      margin-bottom: 20px;
+      color: #3b82f6;
+      text-align: center;
+    }
+
+    .report-container p {
+      margin: 10px 0;
+      font-size: 1.1rem;
+    }
+
+    .report-container strong {
+      color: #3b82f6;
+    }
+
+    /* Buttons */
+    .button-container {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin-top: 20px;
+    }
+
+    .button-container a, .button-container button {
+      text-decoration: none;
+      padding: 12px 20px;
+      background-color: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+
+    .button-container a:hover, .button-container button:hover {
+      background-color: #2563eb;
+    }
+
+    .system-status {
+      display: flex;
+      align-items: center;
+      font-size: 0.9rem;
+      color: #e5e7eb;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      background-color: #10b981;
+      border-radius: 50%;
+      margin-right: 10px;
+    }
+  </style>
+  <script>
+    function updateDateTime() {
+      const now = new Date();
+      document.getElementById('current-time').textContent = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true });
+      document.getElementById('current-date').textContent = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    }
+
+    function downloadPDF() {
+      // Generate the correct PDF path dynamically
+      const pdfUrl = "{{ url_for('static', filename='pdfs/' + video + '.pdf') }}";
+      window.open(pdfUrl, "_blank");
+    }
+
+    function goBack() {
+      window.location.href = "{{ url_for('index') }}";
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      updateDateTime();
+      setInterval(updateDateTime, 1000);
+    });
+  </script>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <span class="logo-icon">&#128249;</span>
+      <span>WatchDog AI</span>
+    </div>
+    <div class="header-right">
+      <div class="time">
+        <span id="current-time"></span>
+      </div>
+      <div class="date">
+        <span id="current-date"></span>
+      </div>
+    </div>
+  </div>
+
+  <h1 class="report-title">Detection Report for {{ video }}</h1>
+
+  <div class="report-container">
+    <p><strong>Most Frequent Activity:</strong> {{ activity }}</p>
+    <p><strong>Unique Person Count:</strong> {{ unique_person_count }}</p>
+    <p><strong>Unique Weapon Count:</strong> {{ unique_weapon_count }}</p>
+    <p><strong>Scene Description:</strong> {{ scene_description }}</p>
+  </div>
+
+  <div class="button-container">
+    <button onclick="downloadPDF()">Download PDF Report</button>
+    <button onclick="goBack()">Back to Videos</button>
+  </div>
+
+  <div class="footer">
+    <div class="system-status">
+      <span class="status-dot"></span>
+      <span>System Status: Normal</span>
+    </div>
+  </div>
+</body>
+</html>

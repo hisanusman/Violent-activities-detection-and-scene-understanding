@@ -1,0 +1,2 @@
+docker pull devlikeapro/waha
+docker run -d --name waha -p 3000:3000 devlikeapro/waha

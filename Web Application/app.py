@@ -4,7 +4,6 @@ import os
 import cv2
 from datetime import timedelta, datetime
 import sys
-import os
 sys.path.append(os.path.abspath("D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\"))
 from predictor import process_frame  # This function now uses an extra check to avoid duplicate timestamps.
 from utils import generate_scene_description, generate_pdf_report, class_labels
@@ -13,20 +12,18 @@ import time
 
 app = Flask(__name__)
 
-# List of original video filenames (assumed to be in static/videos/)
+# Update the list: use "droidcam" placeholder for the live feed (index 2)
 VIDEOS = [
-    "Burglary.mp4",
     "cam0.mp4",
     "cam1.mp4",
-    "cam2.mp4",
+    "droidcam",   # This entry now refers to the live DroidCam feed.
+    "cam3.mp4",
 ]
 
 # Global dictionaries to track processing state per video_id.
 processing_stop_flags = {}      # e.g., { video_id: True/False }
 processing_resume_indices = {}  # e.g., { video_id: last_frame_index } to resume from.
 processing_summaries = {}       # e.g., { video_id: summary_data }
-# We also add a field in last_state (used by process_frame) to store last inserted frame index.
-# (Assume process_frame reads last_state['last_inserted_frame'] and only inserts if different.)
 
 # ------------------ Helper DB Functions ------------------
 def fetch_timestamps(video_name):
@@ -89,8 +86,7 @@ def index():
 @app.route('/video/<int:video_id>')
 def video(video_id):
     if 0 <= video_id < len(VIDEOS):
-        # Clear stop flag so processing will run.
-        processing_stop_flags[video_id] = False
+        processing_stop_flags[video_id] = False  # Clear stop flag so processing will run.
         return render_template('video.html', video=VIDEOS[video_id], video_id=video_id)
     return "Video not found", 404
 
@@ -99,11 +95,10 @@ def video(video_id):
 def navigation(video_id):
     if 0 <= video_id < len(VIDEOS):
         processing_stop_flags[video_id] = True
-        # Wait a moment for the streaming generator to halt and flush its file.
-        time.sleep(1)
+        time.sleep(1)  # Allow generator to finish
         video_name = VIDEOS[video_id]
-        count_vid_name = video_name.rsplit('.', 1)[0]
-        # Get the processed video file name.
+        # For the live feed, assign a unique identifier.
+        count_vid_name = "droidcam_live" if video_id == 2 else video_name.rsplit('.', 1)[0]
         processed_video_name = f"{count_vid_name}_processed.webm"
         times = fetch_timestamps(count_vid_name)
         return render_template('Navigation.html', video=processed_video_name, video_id=video_id, times=times)
@@ -114,10 +109,9 @@ def navigation(video_id):
 def report(video_id):
     if 0 <= video_id < len(VIDEOS):
         processing_stop_flags[video_id] = True
-        # Wait a moment for the generator to finish.
-        time.sleep(1)
+        time.sleep(1)  # Allow generator to finish.
         video_name = VIDEOS[video_id]
-        count_vid_name = video_name.rsplit('.', 1)[0]
+        count_vid_name = "droidcam_live" if video_id == 2 else video_name.rsplit('.', 1)[0]
         summary_data = processing_summaries.get(video_id)
         if summary_data is None:
             counts = fetch_detection_counts(count_vid_name)
@@ -131,11 +125,7 @@ def report(video_id):
             unique_weapon_count = len(summary_data['unique_weapons'])
             upsert_detection_counts(count_vid_name, most_frequent_activity, unique_person_count, unique_weapon_count)
         scene_description = generate_scene_description(most_frequent_activity, unique_person_count, unique_weapon_count)
-        output_dir = os.path.join(
-            "D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Web Application\\static",
-            "pdfs"
-        )
-        # Create the directory if it doesn't exist
+        output_dir = os.path.join("D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Web Application\\static", "pdfs")
         os.makedirs(output_dir, exist_ok=True)
         output_pdf_path = os.path.join(output_dir, f"{count_vid_name}.pdf")
         try:
@@ -154,31 +144,45 @@ def report(video_id):
     return "Video not found", 404
 
 # ------------------ Real-Time Streaming (with saving to file) ------------------
-def generate_real_time_frames(video_path, video_id):
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print("Error opening video file for realtime processing.")
-        return
+def generate_real_time_frames(video_source, video_id):
+    # If video_id == 2, use the DroidCam live feed.
+    if video_id == 2:
+        # Replace with your DroidCam URL (e.g., the IP of your DroidCam phone and port).
+        time.sleep(3)  # Wait for DroidCam to start streaming.
+        cap = cv2.VideoCapture('http://192.168.18.93:4747/video')
+        fps = 50  # Set a default FPS for the live feed.
+    else:
+        cap = cv2.VideoCapture(video_source)
+        if not cap.isOpened():
+            print("Error opening video file for realtime processing.")
+            return
+        fps = int(cap.get(cv2.CAP_PROP_FPS)) or 25
 
-    fps = int(cap.get(cv2.CAP_PROP_FPS)) or 25
     frame_index = 0
 
-    # Determine processed video file output path
-    video_name = os.path.splitext(os.path.basename(video_path))[0]
+    # Determine processed video file output path.
+    video_name = "droidcam_live" if video_id == 2 else os.path.splitext(os.path.basename(video_source))[0]
     processed_dir = os.path.join(app.static_folder, "processed")
     os.makedirs(processed_dir, exist_ok=True)
     output_video_path = os.path.join(processed_dir, f"{video_name}_processed.webm")
 
-    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    # For file-based video, get dimensions from the capture.
+    if video_id != 2:
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    else:
+        # Set dimensions manually for the DroidCam stream if not auto-detected.
+        frame_width, frame_height = 640, 480
+
     fourcc = cv2.VideoWriter_fourcc(*'VP80')
     out_writer = cv2.VideoWriter(output_video_path, fourcc, fps, (frame_width, frame_height))
 
-    # If resuming, set position.
-    resume_index = processing_resume_indices.get(video_id)
-    if resume_index is not None:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, resume_index)
-        frame_index = resume_index
+    # For live feed, resume functionality is not applicable.
+    if video_id != 2:
+        resume_index = processing_resume_indices.get(video_id)
+        if resume_index is not None:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, resume_index)
+            frame_index = resume_index
 
     # Setup DB connection for timestamps.
     ts_db_path = 'D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\detection_timestamps.db'
@@ -206,16 +210,21 @@ def generate_real_time_frames(video_path, video_id):
     
     while True:
         if processing_stop_flags.get(video_id, False):
-            processing_resume_indices[video_id] = frame_index
+            if video_id != 2:
+                processing_resume_indices[video_id] = frame_index
             print(f"Processing stopped for video_id {video_id} at frame {frame_index}")
             break
 
         ret, frame = cap.read()
         if not ret:
-            break
+            # For live feed, if a frame fails, continue to try reading new frames.
+            if video_id == 2:
+                continue
+            else:
+                break
 
         frame_index += 1
-        # Process frame; process_frame is assumed to check last_state['last_inserted_frame']
+        # Process frame: this function handles detection, DB updates, and summary data.
         processed_frame = process_frame(frame, frame_index, fps, video_name, cursor, db_lock, summary_data, summary_lock, last_state)
         out_writer.write(processed_frame)  # Save processed frame to file
 
@@ -234,13 +243,35 @@ def generate_real_time_frames(video_path, video_id):
     processing_summaries[video_id] = summary_data
     print("Final summary updated for:", video_name)
 
+def generate_raw_frames():
+    """Generate raw frames from DroidCam without processing."""
+    time.sleep(3)  # Wait for DroidCam to start streaming.
+    cap = cv2.VideoCapture('http://192.168.18.93:4747/video')
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            #print("No frame received from DroidCam. Retrying...")
+            continue
+        ret, buffer = cv2.imencode('.jpg', frame)
+        if not ret:
+            continue
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+    cap.release()
+
+@app.route('/raw_stream/<int:video_id>')
+def raw_stream(video_id):
+    """Serves raw live feed only for DroidCam (video_id 2)."""
+    if video_id == 2:
+        return Response(generate_raw_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return "Not available", 404
+
 # Route to stream processed frames.
 @app.route('/stream_video/<int:video_id>')
 def stream_video(video_id):
     if 0 <= video_id < len(VIDEOS):
-        video_name = VIDEOS[video_id]
-        video_path = os.path.join(app.static_folder, "videos", video_name)
-        return Response(generate_real_time_frames(video_path, video_id),
+        video_source = "droidcam_live" if video_id == 2 else os.path.join(app.static_folder, "videos", VIDEOS[video_id])
+        return Response(generate_real_time_frames(video_source, video_id),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     return "Video not found", 404
 

@@ -15,10 +15,11 @@ from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, ViTForImageClassification, CLIPProcessor, CLIPModel
 from datetime import datetime, timedelta
-
+import pickle
+from sklearn.metrics.pairwise import cosine_similarity
 # ==================== Utility Functions ====================
 # Initialize OpenAI / LangChain LLM (for report generation)
-llm = OpenAI(api_key="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")
+llm = OpenAI(api_key="API_KEY")
 # Initialize FLAN-T5 model and tokenizer (fallback)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 flan_model_name = "google/flan-t5-base"
@@ -43,7 +44,7 @@ class_labels = {
 }
 
 # Load ViT Model for Activity Recognition
-vit_model_path = "vit_anomaly_detector.pth" 
+vit_model_path = "vit_anomaly_detector (1).pth" 
 vit_model = ViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", num_labels=6, ignore_mismatched_sizes=True
 )
@@ -69,6 +70,31 @@ pose_detector = mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.
 output_img_folder = "weapon_holder_images"
 os.makedirs(output_img_folder, exist_ok=True)
 
+
+# ==================== Load Criminal Embeddings ====================
+with open("D:\\Datasets\\Facial Recognition Augmented\\embeddings.pkl", "rb") as f:
+    criminal_embeddings = pickle.load(f)
+
+# Load YOLO face detection model
+face_model = YOLO("D:\\Datasets\\Facial Recognition Augmented\\yolov8n-face.pt")
+
+def is_criminal(new_embedding, threshold=0.58):
+    """Checks if a detected face matches a known criminal."""
+    new_embedding = np.array(new_embedding).reshape(1, -1)
+    similarities = []
+
+    for e in criminal_embeddings:
+        emb = np.array(e[0]).reshape(1, -1)
+        similarities.append(cosine_similarity(new_embedding, emb)[0, 0])
+
+    max_similarity = max(similarities)
+
+    if max_similarity > threshold:
+        index = np.argmax(similarities)
+        _, name, cnic, age = criminal_embeddings[index]
+        return True, max_similarity, name, cnic, age
+
+    return False, max_similarity, None, None, None
 
 def predict_activity(frame):
     """Predicts the activity label for a given frame using the ViT model."""

@@ -15,34 +15,47 @@
     body {
       background-color: #111827;
       color: white;
-      height: 100vh;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
     }
 
-    .header, .footer {
+    .header {
       background-color: #1e293b;
       padding: 10px 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       width: 100%;
-    }
-
-    .header {
       height: 60px;
       box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-      position: absolute;
+      position: fixed;
       top: 0;
+      z-index: 100;
+    }
+
+    .main-content {
+      margin-top: 60px;
+      margin-bottom: 60px;
+      padding: 20px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
     }
 
     .footer {
+      background-color: #1e293b;
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
       height: 40px;
-      position: absolute;
+      position: fixed;
       bottom: 0;
+      z-index: 100;
     }
 
     .logo {
@@ -69,23 +82,21 @@
       font-size: 0.9rem;
     }
 
-    /* Fixed Video Box */
+    /* Stream Container */
     .stream-container {
-      width: 900px; /* Fixed width */
-      height: 500px; /* Fixed height */
+      width: 100%;
+      max-width: 900px;
       background: #1e293b;
       padding: 10px;
       border-radius: 10px;
       box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.2);
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      aspect-ratio: 16/9;
     }
 
     .stream-container img {
       width: 100%;
       height: 100%;
-      object-fit: cover; /* Ensures video fills the box */
+      object-fit: contain;
       border-radius: 5px;
     }
 
@@ -94,7 +105,9 @@
       display: flex;
       justify-content: center;
       gap: 15px;
-      margin-top: 15px;
+      flex-wrap: wrap;
+      padding: 10px;
+      margin-bottom: 50px;
     }
 
     .button-container a {
@@ -103,8 +116,8 @@
       background-color: #3b82f6;
       color: white;
       border-radius: 5px;
-      display: inline-block;
       transition: 0.3s;
+      white-space: nowrap;
     }
 
     .button-container a:hover {
@@ -126,12 +139,19 @@
       margin-right: 10px;
     }
 
-    /* Responsive Adjustments */
-    @media (max-width: 1000px) {
+    /* Responsive Design */
+    @media (max-width: 768px) {
       .stream-container {
-        width: 100%;
-        height: auto;
-        max-height: 500px;
+        width: 95%;
+      }
+      
+      .button-container {
+        padding: 10px 5px;
+      }
+      
+      .button-container a {
+        padding: 10px 15px;
+        font-size: 0.9rem;
       }
     }
   </style>
@@ -152,27 +172,28 @@
     </div>
   </div>
 
-  <h1 style="margin-top: 70px;">Live Video Stream</h1>
+  <div class="main-content">
+    <h1>Live Video Stream</h1>
 
-  <div class="stream-container">
-    <img src="{{ url_for('stream_video', video_id=video_id) }}" alt="Processed Video Stream">
-  </div>
+    <div class="stream-container">
+      <img src="{{ url_for('stream_video', video_id=video_id) }}" alt="Processed Video Stream">
+    </div>
 
-  <div class="button-container">
-    <a href="{{ url_for('index') }}">Back to Grid</a>
-    <a href="{{ url_for('navigation', video_id=video_id) }}">Navigator</a>
-    <a href="{{ url_for('report', video_id=video_id) }}">Generate Report</a>
+    <div class="button-container">
+      <a href="{{ url_for('index') }}">Back to Grid</a>
+      <a href="{{ url_for('navigation', video_id=video_id) }}">Navigator</a>
+      <a href="{{ url_for('report', video_id=video_id) }}">Generate Report</a>
+    </div>
   </div>
 
   <div class="footer">
     <div class="system-status">
       <span class="status-dot"></span>
-      <span class="status-text">System Status: Normal</span>
+      <span>System Status: Normal</span>
     </div>
   </div>
 
   <script>
-    // Update time and date
     function updateDateTime() {
       const now = new Date();
       const timeOptions = { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true };

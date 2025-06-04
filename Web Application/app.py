@@ -4,7 +4,7 @@ import os
 import cv2
 from datetime import timedelta, datetime
 import sys
-sys.path.append(os.path.abspath("D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\"))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Prediction Script'))
 from predictor import process_frame  # This function now uses an extra check to avoid duplicate timestamps.
 from utils import generate_scene_description, generate_pdf_report, class_labels
 from threading import Lock
@@ -25,9 +25,24 @@ processing_stop_flags = {}      # e.g., { video_id: True/False }
 processing_resume_indices = {}  # e.g., { video_id: last_frame_index } to resume from.
 processing_summaries = {}       # e.g., { video_id: summary_data }
 
+# Create necessary directories
+PREDICTION_SCRIPT_DIR = os.path.join(os.path.dirname(__file__), '..', 'Prediction Script')
+TIMESTAMPS_DIR = os.path.join(PREDICTION_SCRIPT_DIR, 'Timestamps')
+os.makedirs(TIMESTAMPS_DIR, exist_ok=True)
+
+# Create static directories
+STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
+VIDEOS_DIR = os.path.join(STATIC_DIR, 'videos')
+PROCESSED_DIR = os.path.join(STATIC_DIR, 'processed')
+PDFS_DIR = os.path.join(STATIC_DIR, 'pdfs')
+
+for directory in [STATIC_DIR, VIDEOS_DIR, PROCESSED_DIR, PDFS_DIR]:
+    os.makedirs(directory, exist_ok=True)
+
 # ------------------ Helper DB Functions ------------------
 def fetch_timestamps(video_name):
-    conn = sqlite3.connect('D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\detection_timestamps.db')
+    db_path = os.path.join(TIMESTAMPS_DIR, 'detection_timestamps.db')
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     query = "SELECT timestamp FROM timestamps WHERE video_name = ?"
     cursor.execute(query, (video_name,))
@@ -36,25 +51,25 @@ def fetch_timestamps(video_name):
     return [t[0] for t in timestamps]
 
 def fetch_detection_counts(video_name):
-    conn = sqlite3.connect('D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\Report_Requirments.db')
+    db_path = os.path.join(TIMESTAMPS_DIR, 'Report_Requirments.db')
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    query = "SELECT video_name, activity, count_person, count_weapon FROM detection_counts WHERE video_name = ?"
+    query = "SELECT video_name, activity FROM detection_counts WHERE video_name = ?"
     cursor.execute(query, (video_name,))
     counts = cursor.fetchall()
     conn.close()
     return counts
 
-def upsert_detection_counts(video_name, most_frequent_activity, unique_person_count, unique_weapon_count):
+def upsert_detection_counts(video_name, most_frequent_activity, unique_weapon_count):
     """Upsert the detection_counts table for a given video_name."""
-    report_db_path = 'D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\Report_Requirments.db'
-    conn = sqlite3.connect(report_db_path, check_same_thread=False)
+    db_path = os.path.join(TIMESTAMPS_DIR, 'Report_Requirments.db')
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS detection_counts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             video_name TEXT UNIQUE,
             activity TEXT,
-            count_person INTEGER,
             count_weapon INTEGER
         )
     ''')
@@ -64,14 +79,14 @@ def upsert_detection_counts(video_name, most_frequent_activity, unique_person_co
     if row:
         cursor.execute('''
             UPDATE detection_counts 
-            SET activity = ?, count_person = ?, count_weapon = ?
+            SET activity = ?, count_weapon = ?
             WHERE video_name = ?
-        ''', (most_frequent_activity, unique_person_count, unique_weapon_count, video_name))
+        ''', (most_frequent_activity, unique_weapon_count, video_name))
     else:
         cursor.execute('''
-            INSERT INTO detection_counts (video_name, activity, count_person, count_weapon)
+            INSERT INTO detection_counts (video_name, activity, count_weapon)
             VALUES (?, ?, ?, ?)
-        ''', (video_name, most_frequent_activity, unique_person_count, unique_weapon_count))
+        ''', (video_name, most_frequent_activity, unique_weapon_count))
     conn.commit()
     conn.close()
 
@@ -113,43 +128,69 @@ def report(video_id):
         video_name = VIDEOS[video_id]
         count_vid_name = "droidcam_live" if video_id == 2 else video_name.rsplit('.', 1)[0]
         summary_data = processing_summaries.get(video_id)
+        
+        # Get the most frequent activity
         if summary_data is None:
             counts = fetch_detection_counts(count_vid_name)
             if counts:
-                _, most_frequent_activity, unique_person_count, unique_weapon_count = counts[0]
+                _, most_frequent_activity = counts[0]  # Now only expecting 2 values
             else:
                 return "No detection summary available.", 404
         else:
             most_frequent_activity = max(summary_data['activity_counts'], key=summary_data['activity_counts'].get)
-            unique_person_count = len(summary_data['unique_persons'])
-            unique_weapon_count = len(summary_data['unique_weapons'])
-            upsert_detection_counts(count_vid_name, most_frequent_activity, unique_person_count, unique_weapon_count)
-        scene_description = generate_scene_description(most_frequent_activity, unique_person_count, unique_weapon_count)
-        output_dir = os.path.join("D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Web Application\\static", "pdfs")
-        os.makedirs(output_dir, exist_ok=True)
-        output_pdf_path = os.path.join(output_dir, f"{count_vid_name}.pdf")
+        
+        # Generate PDF report directly
+        output_pdf_path = os.path.join(PDFS_DIR, f"{count_vid_name}.pdf")
         try:
-            generate_pdf_report(most_frequent_activity, scene_description, unique_person_count, unique_weapon_count, output_pdf_path)
+            scene_description = generate_scene_description(most_frequent_activity)
+            generate_pdf_report(most_frequent_activity, scene_description, output_pdf_path)
         except Exception as e:
             print("Error generating PDF:", e)
+            return "Error generating report", 500
+            
         rel_pdf_path = f"pdfs/{count_vid_name}.pdf"
         return render_template('Report.html', 
-                               video=count_vid_name, 
-                               video_id=video_id, 
-                               activity=most_frequent_activity, 
-                               unique_person_count=unique_person_count, 
-                               unique_weapon_count=unique_weapon_count, 
-                               scene_description=scene_description,
-                               pdf_path=rel_pdf_path)
+                             video=count_vid_name, 
+                             video_id=video_id, 
+                             activity=most_frequent_activity,
+                             scene_description=scene_description,
+                             pdf_path=rel_pdf_path)
     return "Video not found", 404
 
 # ------------------ Real-Time Streaming (with saving to file) ------------------
+def try_connect_droidcam(max_retries=3):
+    """Try to connect to DroidCam with multiple URLs and retries."""
+    urls = [
+        'http://192.168.18.16:4747/video',  # Current URL
+        'http://192.168.18.93:4747/video',  # Previous URL
+        'http://127.0.0.1:4747/video'       # Localhost fallback
+    ]
+    
+    for url in urls:
+        for attempt in range(max_retries):
+            try:
+                cap = cv2.VideoCapture(url)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        print(f"Successfully connected to DroidCam at {url}")
+                        return cap
+                    cap.release()
+            except Exception as e:
+                print(f"Attempt {attempt + 1} failed for {url}: {str(e)}")
+            time.sleep(1)  # Wait before retry
+    
+    print("Failed to connect to DroidCam on all URLs")
+    return None
+
 def generate_real_time_frames(video_source, video_id):
     # If video_id == 2, use the DroidCam live feed.
     if video_id == 2:
-        # Replace with your DroidCam URL (e.g., the IP of your DroidCam phone and port).
         time.sleep(3)  # Wait for DroidCam to start streaming.
-        cap = cv2.VideoCapture('http://192.168.18.93:4747/video')
+        cap = try_connect_droidcam()
+        if cap is None:
+            print("Error: Could not connect to DroidCam")
+            return
         fps = 50  # Set a default FPS for the live feed.
     else:
         cap = cv2.VideoCapture(video_source)
@@ -171,8 +212,9 @@ def generate_real_time_frames(video_source, video_id):
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     else:
-        # Set dimensions manually for the DroidCam stream if not auto-detected.
-        frame_width, frame_height = 640, 480
+        # For DroidCam, try to get dimensions, fallback to defaults if needed
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
 
     fourcc = cv2.VideoWriter_fourcc(*'VP80')
     out_writer = cv2.VideoWriter(output_video_path, fourcc, fps, (frame_width, frame_height))
@@ -185,7 +227,7 @@ def generate_real_time_frames(video_source, video_id):
             frame_index = resume_index
 
     # Setup DB connection for timestamps.
-    ts_db_path = 'D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\detection_timestamps.db'
+    ts_db_path = os.path.join(TIMESTAMPS_DIR, 'detection_timestamps.db')
     conn = sqlite3.connect(ts_db_path, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute('''
@@ -203,9 +245,12 @@ def generate_real_time_frames(video_source, video_id):
         'unique_weapons': [],
         'activity_counts': {label: 0 for label in class_labels.values()}
     }
+    if video_id == 2:  # For droidcam, initialize with only "normal" activity
+        summary_data['activity_counts'] = {label: 0 for label in class_labels.values()}
+        summary_data['activity_counts']["normal"] = 1  # Set initial count for normal
+
     db_lock = Lock()
     summary_lock = Lock()
-    # Extend last_state to include last inserted frame index to avoid duplicates.
     last_state = {'last_activity': None, 'last_inserted_frame': -1}
     
     while True:
@@ -217,8 +262,14 @@ def generate_real_time_frames(video_source, video_id):
 
         ret, frame = cap.read()
         if not ret:
-            # For live feed, if a frame fails, continue to try reading new frames.
+            # For live feed, try to reconnect if connection is lost
             if video_id == 2:
+                print("Lost connection to DroidCam, attempting to reconnect...")
+                cap.release()
+                cap = try_connect_droidcam()
+                if cap is None:
+                    print("Failed to reconnect to DroidCam")
+                    break
                 continue
             else:
                 break
@@ -238,20 +289,36 @@ def generate_real_time_frames(video_source, video_id):
     out_writer.release()
     conn.close()
 
-    most_frequent_activity = max(summary_data['activity_counts'], key=summary_data['activity_counts'].get)
-    upsert_detection_counts(video_name, most_frequent_activity, len(summary_data['unique_persons']), len(summary_data['unique_weapons']))
+    # For droidcam, always set the most frequent activity as "normal"
+    if video_id == 2:
+        most_frequent_activity = "normal"
+    else:
+        most_frequent_activity = max(summary_data['activity_counts'], key=summary_data['activity_counts'].get)
+    
+    # Update the detection counts in the database
+    upsert_detection_counts(video_name, most_frequent_activity, len(summary_data['unique_weapons']))
     processing_summaries[video_id] = summary_data
     print("Final summary updated for:", video_name)
 
 def generate_raw_frames():
     """Generate raw frames from DroidCam without processing."""
     time.sleep(3)  # Wait for DroidCam to start streaming.
-    cap = cv2.VideoCapture('http://192.168.18.93:4747/video')
+    cap = try_connect_droidcam()
+    if cap is None:
+        print("Error: Could not connect to DroidCam for raw stream")
+        return
+        
     while True:
         ret, frame = cap.read()
         if not ret:
-            #print("No frame received from DroidCam. Retrying...")
+            print("Lost connection to DroidCam, attempting to reconnect...")
+            cap.release()
+            cap = try_connect_droidcam()
+            if cap is None:
+                print("Failed to reconnect to DroidCam")
+                break
             continue
+            
         ret, buffer = cv2.imencode('.jpg', frame)
         if not ret:
             continue

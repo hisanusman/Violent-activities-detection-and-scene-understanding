@@ -4,9 +4,9 @@ import os
 import cv2
 from datetime import timedelta, datetime
 import sys
-sys.path.append(os.path.abspath("D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\"))
-from predictor import process_frame  # This function now uses an extra check to avoid duplicate timestamps.
-from utils import generate_scene_description, generate_pdf_report, class_labels
+sys.path.append(os.path.abspath("D:\\FYP\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\"))
+from predictor import process_frame # This function now uses an extra check to avoid duplicate timestamps.
+from utils import generate_scene_description, generate_crime_scene_report_pdf, class_labels
 from threading import Lock
 import time
 
@@ -27,7 +27,7 @@ processing_summaries = {}       # e.g., { video_id: summary_data }
 
 # ------------------ Helper DB Functions ------------------
 def fetch_timestamps(video_name):
-    conn = sqlite3.connect('D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\detection_timestamps.db')
+    conn = sqlite3.connect('D:\\FYP\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\detection_timestamps.db')
     cursor = conn.cursor()
     query = "SELECT timestamp FROM timestamps WHERE video_name = ?"
     cursor.execute(query, (video_name,))
@@ -36,7 +36,7 @@ def fetch_timestamps(video_name):
     return [t[0] for t in timestamps]
 
 def fetch_detection_counts(video_name):
-    conn = sqlite3.connect('D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\Report_Requirments.db')
+    conn = sqlite3.connect('D:\\FYP\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\Report_Requirments.db')
     cursor = conn.cursor()
     query = "SELECT video_name, activity, count_person, count_weapon FROM detection_counts WHERE video_name = ?"
     cursor.execute(query, (video_name,))
@@ -46,7 +46,7 @@ def fetch_detection_counts(video_name):
 
 def upsert_detection_counts(video_name, most_frequent_activity, unique_person_count, unique_weapon_count):
     """Upsert the detection_counts table for a given video_name."""
-    report_db_path = 'D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\Report_Requirments.db'
+    report_db_path = 'D:\\FYP\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\Report_Requirments.db'
     conn = sqlite3.connect(report_db_path, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute('''
@@ -125,11 +125,11 @@ def report(video_id):
             unique_weapon_count = len(summary_data['unique_weapons'])
             upsert_detection_counts(count_vid_name, most_frequent_activity, unique_person_count, unique_weapon_count)
         scene_description = generate_scene_description(most_frequent_activity, unique_person_count, unique_weapon_count)
-        output_dir = os.path.join("D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Web Application\\static", "pdfs")
+        output_dir = os.path.join("D:\\FYP\\FYP\\Violent-activities-detection-and-scene-understanding\\Web Application\\static", "pdfs")
         os.makedirs(output_dir, exist_ok=True)
         output_pdf_path = os.path.join(output_dir, f"{count_vid_name}.pdf")
         try:
-            generate_pdf_report(most_frequent_activity, scene_description, unique_person_count, unique_weapon_count, output_pdf_path)
+            generate_crime_scene_report_pdf(most_frequent_activity, scene_description, unique_person_count, unique_weapon_count, output_pdf_path)
         except Exception as e:
             print("Error generating PDF:", e)
         rel_pdf_path = f"pdfs/{count_vid_name}.pdf"
@@ -149,7 +149,7 @@ def generate_real_time_frames(video_source, video_id):
     if video_id == 2:
         # Replace with your DroidCam URL (e.g., the IP of your DroidCam phone and port).
         time.sleep(3)  # Wait for DroidCam to start streaming.
-        cap = cv2.VideoCapture('http://192.168.18.93:4747/video')
+        cap = cv2.VideoCapture('http://192.168.100.33:4747/video')
         fps = 50  # Set a default FPS for the live feed.
     else:
         cap = cv2.VideoCapture(video_source)
@@ -185,7 +185,7 @@ def generate_real_time_frames(video_source, video_id):
             frame_index = resume_index
 
     # Setup DB connection for timestamps.
-    ts_db_path = 'D:\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\detection_timestamps.db'
+    ts_db_path = 'D:\\FYP\\FYP\\Violent-activities-detection-and-scene-understanding\\Prediction Script\\Timestamps\\detection_timestamps.db'
     conn = sqlite3.connect(ts_db_path, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute('''
@@ -246,7 +246,7 @@ def generate_real_time_frames(video_source, video_id):
 def generate_raw_frames():
     """Generate raw frames from DroidCam without processing."""
     time.sleep(3)  # Wait for DroidCam to start streaming.
-    cap = cv2.VideoCapture('http://192.168.18.93:4747/video')
+    cap = cv2.VideoCapture('http://192.168.100.33:4747/video')
     while True:
         ret, frame = cap.read()
         if not ret:

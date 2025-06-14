@@ -172,49 +172,134 @@ def run_pose_estimation_and_save(crop_img, frame_index):
 # ==================== Report Generation Functions ====================
 
 def generate_scene_description_with_openai(activity, num_people, num_weapons):
-    """Generates a scene description using OpenAI's API via LangChain."""
+    """Generates a scene description using OpenAI's GPT-4 API via LangChain."""
     prompt_template = PromptTemplate(
         input_variables=["activity", "num_people", "num_weapons"],
         template=(
-            "You are a crime scene investigator analyzing a video. "
+            "You are an expert crime scene investigator analyzing violent CCTV footage. "
             "The detected activity is '{activity}'. "
-            "There are {num_people} people involved and {num_weapons} weapons detected. "
-            "Write a detailed and professional crime scene report describing the event in a formal manner."
+            "There are multiple people and {num_weapons} weapon(s) in the scene. "
+            "Write a detailed and professional crime scene report of at least 4-5 lines, describing the event in a formal manner. "
+            "Include relevant details such as the nature of the activity, number of people involved, and any weapons detected."
         ),
     )
     prompt = prompt_template.format(activity=activity, num_people=num_people, num_weapons=num_weapons)
-    response = llm.predict(prompt)
-    return response
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are an expert crime scene investigator."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    return response['choices'][0]['message']['content']
 
 def generate_scene_description_with_flan(activity, num_people, num_weapons):
     """Generates a scene description using FLAN-T5."""
     prompt = (
-        f"You are a crime scene investigator analyzing a video. "
+        f"You are an expert crime scene investigator analyzing violent CCTV footage. "
         f"The detected activity is '{activity}'. "
-        f"There are {num_people} people involved and {num_weapons} weapons detected. "
-        f"Write a detailed and professional crime scene report of at least 4 to 6 lines, describing the event in a formal manner so that it may be helpful in a police investigation."
+        f"There are multiple people and {num_weapons} weapon(s) in the scene. "
+        f"Write a detailed and professional crime scene report of at least 4 to 6 lines, describing the event in a formal manner. "
+        f"Ensure that the report is useful for a police investigation."
     )
     inputs = flan_tokenizer(prompt, return_tensors="pt").to(device)
-    outputs = flan_model.generate(**inputs, max_length=1000)
+    outputs = flan_model.generate(**inputs, max_length=1500)
     return flan_tokenizer.decode(outputs[0], skip_special_tokens=True)
 
+# -----------------------
+# Combined Scene Description Function
+# -----------------------
 def generate_scene_description(activity, num_people, num_weapons):
-    """Generates a scene description using OpenAI's API, with FLAN-T5 as a fallback."""
+    """
+    Generates a combined scene description by first obtaining a dynamic report
+    using OpenAI's API (with FLAN-T5 as fallback) and then enhancing it with additional
+    details generated from pre-defined templates.
+    """
+    # Generate the dynamic scene description using AI
     try:
-        return generate_scene_description_with_openai(activity, num_people, num_weapons)
+        ai_description = generate_scene_description_with_openai(activity, num_people, num_weapons)
     except Exception as e:
         print(f"OpenAI API error: {e}. Falling back to FLAN-T5.")
-        return generate_scene_description_with_flan(activity, num_people, num_weapons)
+        ai_description = generate_scene_description_with_flan(activity, num_people, num_weapons)
+    
+    # -----------------------
+    # Template Definitions
+    # -----------------------
+    intro_templates = {
+        "fighting": "Analysis of CCTV footage has documented a physical altercation classified as {activity}. The incident occurred at the captured location.",
+        "abuse": "CCTV footage analysis reveals evidence of abusive behavior classified as {activity}. The footage shows interaction between multiple individuals with clear signs of physical or verbal aggression.",
+        "arson": "CCTV footage captured evidence of intentional fire-setting classified as {activity}. The footage shows individuals present during the incident.",
+        "burglary": "Security camera footage has documented a breaking and entering incident classified as {activity}.",
+        "shooting": "CCTV analysis has documented a firearms discharge incident classified as {activity}. The footage shows multiple individuals present during the exchange.",
+        "vandalism": "Video evidence shows property damage incident classified as {activity}. The footage captured numerous individuals engaged in destructive behavior.",
+        # Default template for any other activity
+        "normal": "CCTV footage analysis has documented everything as {activity}. Everything seems to be calm and pleasant."
+    }
+    
+    weapon_templates = {
+        0: "No weapons were visibly identified in the footage.",
+        1: "Analysis identified 1 weapon present during the incident. This significantly escalates the severity classification of the event.",
+        2: "Analysis identified {num_weapons} weapons present during the incident. The presence of multiple weapons indicates a high-risk situation with potential for serious harm.",
+        "default": "Analysis identified {num_weapons} weapons present during the incident. This large number of weapons indicates a coordinated and highly dangerous situation."
+    }
+    
+    severity_templates = {
+        "fighting": "This incident is classified as a physical assault case, potentially involving charges of battery or aggravated assault depending on injury outcomes.",
+        "abuse": "This incident is classified as an abuse case, potentially involving domestic violence, assault, or battery charges depending on the relationship between participants.",
+        "arson": "This incident is classified as arson, a serious felony offense with potential for additional charges including attempted murder if occupants were present.",
+        "burglary": "This incident is classified as burglary, a felony offense with potential additional charges of trespassing and theft.",
+        "shooting": "This incident is classified as a firearms offense with potential charges including attempted murder, assault with a deadly weapon, and illegal discharge of a firearm.",
+        "vandalism": "This incident is classified as vandalism or criminal damage to property, with severity classification depending on the extent of damage.",
+        "normal": "This incident suggests that everything is normal and smooth, and no criminal or violent activity has happened."
+    }
+    
+    recommendation_template = """Further investigation is recommended, including:
+    1. Collection of additional footage from nearby cameras to track participant movements
+    2. Forensic analysis of {weapon_text} to determine origin and ownership
+    3. Interviews with any witnesses present during the incident
+    4. Correlation with any reported incidents in the area during the same timeframe."""
+    
+    # Generate additional details using the templates
+    intro = intro_templates.get(activity, intro_templates["normal"]).format(activity=activity)
+    
+    if num_weapons in weapon_templates:
+        weapons_para = weapon_templates[num_weapons].format(num_weapons=num_weapons)
+    else:
+        weapons_para = weapon_templates["default"].format(num_weapons=num_weapons)
+        
+    severity = severity_templates.get(activity, severity_templates["normal"])
+    
+    weapon_text = "weapons" if num_weapons != 1 else "the weapon"
+    recommendations = recommendation_template.format(weapon_text=weapon_text)
+    
+    template_details = f"{intro}\n\n{weapons_para}\n\n{severity}\n\n{recommendations}"
+    
+    # Combine the AI-generated description with the additional template details
+    full_description = f"{ai_description}\n\nAdditional Details:\n{template_details}"
+    return full_description
 
-def generate_pdf_report(activity, scene_description, num_people, num_weapons, output_path):
+# -----------------------
+# PDF Generation Function
+# -----------------------
+def generate_crime_scene_report_pdf(activity, num_people, num_weapons, output_path):
     """
-    Generates a formal crime scene report PDF in a custom format.
-    The layout includes:
+    Generates a formal crime scene report PDF that includes:
       - Title ("Crime Scene Report")
       - Date, Time, and Location fields
-      - Detected Crime, People Involved, Weapons Found
-      - A multi-line scene description
+      - Detected Crime and Weapons Found
+      - A scene description that is dynamically generated using AI and enhanced with template-based details
+      - A footer with a generation timestamp
+      
+    Parameters:
+        activity (str): The type of crime.
+        num_people (int): Number of people involved.
+        num_weapons (int): Number of weapons detected.
+        output_path (str): The file path to save the PDF.
     """
+    # Generate the combined scene description
+    scene_description = generate_scene_description(activity, num_people, num_weapons)
+
+    # Create the PDF
     pdf = FPDF('P', 'mm', 'A4')
     pdf.add_page()
 
@@ -232,6 +317,7 @@ def generate_pdf_report(activity, scene_description, num_people, num_weapons, ou
     now = datetime.now()
     date_str = now.strftime("%d-%m-%Y")
     time_str = now.strftime("%H:%M:%S")
+    
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(40, 10, "Date:")
     pdf.set_font("Arial", '', 12)
@@ -245,7 +331,7 @@ def generate_pdf_report(activity, scene_description, num_people, num_weapons, ou
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(40, 10, "Location:")
     pdf.set_font("Arial", '', 12)
-    pdf.cell(0, 10, "Not Specified", ln=True)  # Placeholder
+    pdf.cell(0, 10, "Not Specified", ln=True)  # Placeholder for location
 
     pdf.ln(5)
 
@@ -256,18 +342,13 @@ def generate_pdf_report(activity, scene_description, num_people, num_weapons, ou
     pdf.cell(0, 10, activity, ln=True)
 
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(60, 10, "People Involved:")
-    pdf.set_font("Arial", '', 12)
-    pdf.cell(0, 10, str(num_people), ln=True)
-
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(60, 10, "Weapons Found:")
+    pdf.cell(60, 10, "Weapons found (if any):")
     pdf.set_font("Arial", '', 12)
     pdf.cell(0, 10, str(num_weapons), ln=True)
 
     pdf.ln(10)
 
-    # Scene Description Header
+    # Scene Description Header and Content
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "Scene Description:", ln=True)
     pdf.ln(5)
@@ -280,3 +361,4 @@ def generate_pdf_report(activity, scene_description, num_people, num_weapons, ou
     pdf.cell(0, 10, f"Report generated on {date_str} at {time_str}", align="C")
 
     pdf.output(output_path)
+

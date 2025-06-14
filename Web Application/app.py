@@ -120,18 +120,31 @@ def report(video_id):
             else:
                 return "No detection summary available.", 404
         else:
-            most_frequent_activity = max(summary_data['activity_counts'], key=summary_data['activity_counts'].get)
+            # Filter out activities with zero count before finding the max
+            filtered_counts = {k: v for k, v in summary_data['activity_counts'].items() if v > 0}
+            if not filtered_counts:
+                most_frequent_activity = "Normal" # Default if no activity was detected
+            else:
+                most_frequent_activity = max(filtered_counts, key=filtered_counts.get)
+
             unique_person_count = len(summary_data['unique_persons'])
             unique_weapon_count = len(summary_data['unique_weapons'])
             upsert_detection_counts(count_vid_name, most_frequent_activity, unique_person_count, unique_weapon_count)
-        scene_description = generate_scene_description(most_frequent_activity, unique_person_count, unique_weapon_count)
+            
         output_dir = os.path.join("D:\\FYP\\FYP\\Violent-activities-detection-and-scene-understanding\\Web Application\\static", "pdfs")
         os.makedirs(output_dir, exist_ok=True)
         output_pdf_path = os.path.join(output_dir, f"{count_vid_name}.pdf")
+        
         try:
-            generate_crime_scene_report_pdf(most_frequent_activity, scene_description, unique_person_count, unique_weapon_count, output_pdf_path)
+            generate_crime_scene_report_pdf(most_frequent_activity, unique_person_count, unique_weapon_count, output_pdf_path)
+            # The original call had a 'scene_description' argument that is now generated inside the PDF function.
+            # generate_crime_scene_report_pdf(most_frequent_activity, scene_description, unique_person_count, unique_weapon_count, output_pdf_path)
         except Exception as e:
             print("Error generating PDF:", e)
+        
+        # We also need the scene description for the web page, so we call it separately.
+        scene_description = generate_scene_description(most_frequent_activity, unique_person_count, unique_weapon_count)
+
         rel_pdf_path = f"pdfs/{count_vid_name}.pdf"
         return render_template('Report.html', 
                                video=count_vid_name, 
@@ -225,7 +238,7 @@ def generate_real_time_frames(video_source, video_id):
 
         frame_index += 1
         # Process frame: this function handles detection, DB updates, and summary data.
-        processed_frame = process_frame(frame, frame_index, fps, video_name, cursor, db_lock, summary_data, summary_lock, last_state)
+        processed_frame = process_frame(frame, frame_index, fps, video_name, cursor, db_lock, summary_data, summary_lock, last_state, video_id=video_id)
         out_writer.write(processed_frame)  # Save processed frame to file
 
         ret, buffer = cv2.imencode('.jpg', processed_frame)
@@ -237,8 +250,14 @@ def generate_real_time_frames(video_source, video_id):
     cap.release()
     out_writer.release()
     conn.close()
-
-    most_frequent_activity = max(summary_data['activity_counts'], key=summary_data['activity_counts'].get)
+    
+    # Filter out activities with zero count before finding the max
+    filtered_counts = {k: v for k, v in summary_data['activity_counts'].items() if v > 0}
+    if not filtered_counts:
+        most_frequent_activity = "Normal" # Default if no activity was detected
+    else:
+        most_frequent_activity = max(filtered_counts, key=filtered_counts.get)
+        
     upsert_detection_counts(video_name, most_frequent_activity, len(summary_data['unique_persons']), len(summary_data['unique_weapons']))
     processing_summaries[video_id] = summary_data
     print("Final summary updated for:", video_name)

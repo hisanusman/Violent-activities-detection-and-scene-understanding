@@ -17,6 +17,8 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, ViTForImageClassi
 from datetime import datetime, timedelta
 import pickle
 from sklearn.metrics.pairwise import cosine_similarity
+from deepface import DeepFace # <-- ADDED IMPORT
+
 # ==================== Utility Functions ====================
 # Initialize OpenAI / LangChain LLM (for report generation)
 llm = OpenAI(api_key="API_KEY")
@@ -33,29 +35,40 @@ transform = transforms.Compose([
     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 ])
 
-# Class Labels for ViT Model
-class_labels = {
-    0: 'fighting',
-    1: 'abuse',
-    2: 'arson',
-    3: 'burglary',
-    4: 'shooting',
-    5: 'vandalism'
+# ==================== Model and Label Configuration ====================
+# --- Model 1 (7 Classes for cam0, droidcam) ---
+class_labels_1 = {
+    0: 'fighting', 1: 'abuse', 2: 'arson', 3: 'burglary',
+    4: 'shooting', 5: 'vandalism', 6: 'Normal'
 }
+vit_model_path_1 = "vit_anomaly_detector.pth"
+vit_model_1 = ViTForImageClassification.from_pretrained(
+    "google/vit-base-patch16-224", num_labels=7, ignore_mismatched_sizes=True
+)
+vit_model_1.load_state_dict(torch.load(vit_model_path_1, map_location=device))
+vit_model_1.to(device).eval()
 
-# Load ViT Model for Activity Recognition
-vit_model_path = "vit_anomaly_detector (1).pth" 
-vit_model = ViTForImageClassification.from_pretrained(
+# --- Model 2 (6 Classes for cam1, cam3) ---
+class_labels_2 = {
+    0: 'fighting', 1: 'abuse', 2: 'arson', 3: 'burglary',
+    4: 'shooting', 5: 'vandalism'
+}
+vit_model_path_2 = "vit_anomaly_detector (1).pth"
+vit_model_2 = ViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", num_labels=6, ignore_mismatched_sizes=True
 )
+vit_model_2.load_state_dict(torch.load(vit_model_path_2, map_location=device))
+vit_model_2.to(device).eval()
 
-vit_model.load_state_dict(torch.load(vit_model_path, map_location=device))
-vit_model.to(device).eval()
+
+# --- Master Class Labels (for initializing counters) ---
+all_label_names = sorted(list(set(class_labels_1.values()) | set(class_labels_2.values())))
+class_labels = {i: label for i, label in enumerate(all_label_names)}
+
 
 # Load Weapon (and Person) Detection Model (YOLOv8)
 weapon_model = YOLO("best_weapons.pt")
 weapon_model.to(device)
-# Disable fusing to prevent removal of non-existent batchnorm layers.
 try:
     weapon_model.model.fuse = lambda verbose=True: weapon_model.model
     print("Model fuse disabled successfully.")
@@ -71,21 +84,26 @@ output_img_folder = "weapon_holder_images"
 os.makedirs(output_img_folder, exist_ok=True)
 
 
-# ==================== Load Criminal Embeddings ====================
+# ==================== Criminal Recognition Setup ====================
+# Load YOLO face detection model
+face_model = YOLO("D:\\Datasets\\Facial Recognition Augmented\\yolov8n-face.pt")
+face_model.to(device)
+
+# Load pre-computed criminal embeddings
 with open("D:\\Datasets\\Facial Recognition Augmented\\embeddings.pkl", "rb") as f:
     criminal_embeddings = pickle.load(f)
 
-# Load YOLO face detection model
-face_model = YOLO("D:\\Datasets\\Facial Recognition Augmented\\yolov8n-face.pt")
-
 def is_criminal(new_embedding, threshold=0.58):
-    """Checks if a detected face matches a known criminal."""
+    """Checks if a detected face matches a known criminal using cosine similarity."""
     new_embedding = np.array(new_embedding).reshape(1, -1)
     similarities = []
 
     for e in criminal_embeddings:
         emb = np.array(e[0]).reshape(1, -1)
         similarities.append(cosine_similarity(new_embedding, emb)[0, 0])
+
+    if not similarities:
+        return False, 0, None, None, None
 
     max_similarity = max(similarities)
 
@@ -96,22 +114,79 @@ def is_criminal(new_embedding, threshold=0.58):
 
     return False, max_similarity, None, None, None
 
-def predict_activity(frame):
-    """Predicts the activity label for a given frame using the ViT model."""
+def recognize_criminals_and_draw(frame):
+    """
+    Detects faces, checks if they are known criminals, draws info on the frame,
+    and returns a list of detected criminals' data.
+    
+    Returns:
+        list: A list of dictionaries, where each dict contains info of a detected criminal.
+              e.g., [{'name': 'John Doe', 'cnic': '12345', 'age': 30}]
+    """
+    detected_criminals = []
+    # Run YOLO face detection
+    results = face_model(frame)
+    detections = results[0].boxes.xyxy.cpu().numpy()
+    confidences = results[0].boxes.conf.cpu().numpy()
+
+    for detection, confidence in zip(detections, confidences):
+        if confidence < 0.57:
+            continue
+
+        x1, y1, x2, y2 = map(int, detection[:4])
+        face_img = frame[y1:y2, x1:x2]
+
+        if face_img.size == 0:
+            continue
+
+        try:
+            embedding_objs = DeepFace.represent(face_img, model_name="Facenet", enforce_detection=False)
+            if isinstance(embedding_objs, list) and len(embedding_objs) > 0:
+                new_embedding = embedding_objs[0]["embedding"]
+            else:
+                continue
+        except Exception:
+            continue
+
+        criminal_detected, _, name, cnic, age = is_criminal(new_embedding, threshold=0.58)
+
+        if criminal_detected:
+            # Draw on the frame (side effect)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.putText(frame, f"{name}, {age} yrs", (x1, y1 - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            cv2.putText(frame, f"CNIC: {cnic}", (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            
+            # Add data to the list to be returned
+            detected_criminals.append({'name': name, 'cnic': cnic, 'age': age})
+            
+    return detected_criminals
+
+# ==================== Core Detection Functions ====================
+
+def predict_activity(frame, video_id):
+    """
+    Predicts activity using the correct ViT model based on video_id.
+    """
+    if video_id in [1, 3]:
+        model_to_use = vit_model_2
+        labels_to_use = class_labels_2
+        default_label = "vandalism"
+    else:
+        model_to_use = vit_model_1
+        labels_to_use = class_labels_1
+        default_label = "Normal"
+
     image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     image = transform(image).unsqueeze(0).to(device)
     with torch.no_grad():
-        output = vit_model(image)
+        output = model_to_use(image)
         logits = output.logits
         predicted_class = torch.argmax(logits, dim=1).item()
-    return class_labels.get(predicted_class, "normal")
+    return labels_to_use.get(predicted_class, default_label)
 
 def detect_objects(frame):
     """
-    Runs the YOLO model on the given frame and returns two lists:
-      - weapons: list of bounding boxes for weapons
-      - persons: list of bounding boxes for persons
-    Bounding boxes are tuples of (x1, y1, x2, y2).
+    Runs the YOLO model on the given frame to detect weapons and persons.
     """
     results = weapon_model(frame)
     weapons, persons = [], []
@@ -120,9 +195,9 @@ def detect_objects(frame):
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             conf = box.conf[0].item()
             cls = int(box.cls[0].item())
-            if cls == 1 and conf >= 0.75:  # Assuming Class 1 is 'Weapon'
+            if cls == 1 and conf >= 0.75:  # Weapon
                 weapons.append((x1, y1, x2, y2))
-            elif cls == 0 and conf >= 0.8:  # Assuming Class 0 is 'Person'
+            elif cls == 0 and conf >= 0.8:  # Person
                 persons.append((x1, y1, x2, y2))
     return weapons, persons
 
@@ -130,17 +205,12 @@ def identify_weapon_holder(weapons, persons):
     """Returns the bounding box of a person holding a weapon if found."""
     for wx1, wy1, wx2, wy2 in weapons:
         for px1, py1, px2, py2 in persons:
-            # If the weapon's top-left is within the person's bounding box
             if px1 < wx1 < px2 and py1 < wy1 < py2:
                 return (px1, py1, px2, py2)
     return None
 
 def update_unique_objects(unique_list, detections, threshold=50):
-    """
-    Updates the list of unique objects based on detection bounding boxes.
-    For each detection, the centroid is calculated and compared with centroids in unique_list.
-    If the distance is greater than 'threshold' from all existing ones, it is added.
-    """
+    """Updates the list of unique objects based on detection bounding boxes."""
     for box in detections:
         x1, y1, x2, y2 = box
         center = ((x1 + x2) / 2, (y1 + y2) / 2)
@@ -154,11 +224,7 @@ def update_unique_objects(unique_list, detections, threshold=50):
             unique_list.append(center)
 
 def run_pose_estimation_and_save(crop_img, frame_index):
-    """
-    Runs MediaPipe Pose estimation on the given image crop,
-    draws pose landmarks on it, and saves the image.
-    Returns the annotated image.
-    """
+    """Runs MediaPipe Pose estimation, saves the image, and returns it."""
     crop_rgb = cv2.cvtColor(crop_img, cv2.COLOR_BGR2RGB)
     results = pose_detector.process(crop_rgb)
     annotated_image = crop_img.copy()
@@ -233,7 +299,7 @@ def generate_scene_description(activity, num_people, num_weapons):
         "shooting": "CCTV analysis has documented a firearms discharge incident classified as {activity}. The footage shows multiple individuals present during the exchange.",
         "vandalism": "Video evidence shows property damage incident classified as {activity}. The footage captured numerous individuals engaged in destructive behavior.",
         # Default template for any other activity
-        "normal": "CCTV footage analysis has documented everything as {activity}. Everything seems to be calm and pleasant."
+        "Normal": "CCTV footage analysis has documented everything as {activity}. Everything seems to be calm and pleasant."
     }
     
     weapon_templates = {
@@ -250,7 +316,7 @@ def generate_scene_description(activity, num_people, num_weapons):
         "burglary": "This incident is classified as burglary, a felony offense with potential additional charges of trespassing and theft.",
         "shooting": "This incident is classified as a firearms offense with potential charges including attempted murder, assault with a deadly weapon, and illegal discharge of a firearm.",
         "vandalism": "This incident is classified as vandalism or criminal damage to property, with severity classification depending on the extent of damage.",
-        "normal": "This incident suggests that everything is normal and smooth, and no criminal or violent activity has happened."
+        "Normal": "This incident suggests that everything is normal and smooth, and no criminal or violent activity has happened."
     }
     
     recommendation_template = """Further investigation is recommended, including:
@@ -260,14 +326,14 @@ def generate_scene_description(activity, num_people, num_weapons):
     4. Correlation with any reported incidents in the area during the same timeframe."""
     
     # Generate additional details using the templates
-    intro = intro_templates.get(activity, intro_templates["normal"]).format(activity=activity)
+    intro = intro_templates.get(activity, intro_templates["Normal"]).format(activity=activity)
     
     if num_weapons in weapon_templates:
         weapons_para = weapon_templates[num_weapons].format(num_weapons=num_weapons)
     else:
         weapons_para = weapon_templates["default"].format(num_weapons=num_weapons)
         
-    severity = severity_templates.get(activity, severity_templates["normal"])
+    severity = severity_templates.get(activity, severity_templates["Normal"])
     
     weapon_text = "weapons" if num_weapons != 1 else "the weapon"
     recommendations = recommendation_template.format(weapon_text=weapon_text)
@@ -361,4 +427,3 @@ def generate_crime_scene_report_pdf(activity, num_people, num_weapons, output_pa
     pdf.cell(0, 10, f"Report generated on {date_str} at {time_str}", align="C")
 
     pdf.output(output_path)
-

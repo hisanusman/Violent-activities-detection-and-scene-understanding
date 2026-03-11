@@ -1,4 +1,4 @@
-# Violence & Criminal AI Detection System
+# Violence & Criminal AI Detection System (WatchDog AI)
 
 ## Overview
 This repository contains the implementation of an advanced crime and violence detection system utilizing deep learning techniques. The system is designed to analyze CCTV footage, detect violent activities, recognize criminals, bookmark frames for forensic analysis, and generate AI based reports when critical incidents occur.
